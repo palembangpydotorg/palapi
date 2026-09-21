@@ -7,18 +7,19 @@ from fastapi import UploadFile, HTTPException
 import secrets
 import string
 import bcrypt
-
 from models import (
     User, Partner, Event, Speaker,
     SpeakerMaterial, Certificate
 )
-
 
 # --- Security ---
 def get_password_hash(password: str) -> str:
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
     return hashed.decode("utf-8")
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 def generate_secure_password(length: int = 12) -> str:
     return "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(length))
@@ -35,11 +36,9 @@ ALLOWED_MIME_TYPES = {
     "application/zip"
 }
 
-
 # --- Helpers ---
 def exclude_deleted(model: Any):
     return model.deleted_at.is_(None)
-
 
 def validate_file(file: UploadFile):
     if file.size and file.size > MAX_FILE_SIZE:
@@ -53,7 +52,6 @@ def validate_file(file: UploadFile):
             detail="File type not allowed. Allowed types: PDF, PNG, JPEG, PPTX, ZIP"
         )
 
-
 def save_uploaded_file(file: UploadFile, subfolder: str) -> Path:
     ext = file.filename.split(".")[-1].lower()
     safe_name = f"{uuid4()}.{ext}"
@@ -63,7 +61,6 @@ def save_uploaded_file(file: UploadFile, subfolder: str) -> Path:
         f.write(file.file.read())
     return target
 
-
 # --- User ---
 def create_user(db: Session, data: dict) -> Tuple[User, str]:
     if data.get("telegram_id"):
@@ -72,16 +69,14 @@ def create_user(db: Session, data: dict) -> Tuple[User, str]:
         ).first()
         if existing:
             raise ValueError("telegram_id already registered")
-
-    generated_password = generate_secure_password()  # Default 12 chars
-    data["password_hash"] = get_password_hash(generated_password)
-
+    
+    generated_password = generate_secure_password()
+    data["password_hash"] = get_password_hash(generated_password)  # ✅ TETAP password_hash
     user = User(**data)
     db.add(user)
     db.commit()
     db.refresh(user)
     return user, generated_password
-
 
 def get_users(db: Session, include_deleted: bool = False) -> list[User]:
     stmt = select(User)
@@ -89,13 +84,11 @@ def get_users(db: Session, include_deleted: bool = False) -> list[User]:
         stmt = stmt.where(exclude_deleted(User))
     return db.exec(stmt.order_by(User.created_at.desc())).all()
 
-
 def get_user(db: Session, user_id: UUID, include_deleted: bool = False) -> User | None:
     stmt = select(User).where(User.id == user_id)
     if not include_deleted:
         stmt = stmt.where(exclude_deleted(User))
     return db.exec(stmt).first()
-
 
 def get_user_by_telegram(db: Session, telegram_id: str) -> User | None:
     return db.exec(
@@ -105,7 +98,6 @@ def get_user_by_telegram(db: Session, telegram_id: str) -> User | None:
         )
     ).first()
 
-
 def update_user(db: Session, user: User, data: dict) -> User:
     for key, value in data.items():
         if value is not None:
@@ -114,18 +106,15 @@ def update_user(db: Session, user: User, data: dict) -> User:
     db.refresh(user)
     return user
 
-
 def soft_delete_user(db: Session, user: User) -> bool:
     user.soft_delete()
     db.commit()
     return True
 
-
 def hard_delete_user(db: Session, user: User) -> bool:
     db.delete(user)
     db.commit()
     return True
-
 
 # --- Partner ---
 def create_partner(db: Session, data: dict) -> Partner:
@@ -135,20 +124,17 @@ def create_partner(db: Session, data: dict) -> Partner:
     db.refresh(partner)
     return partner
 
-
 def get_partners(db: Session, include_deleted: bool = False) -> list[Partner]:
     stmt = select(Partner)
     if not include_deleted:
         stmt = stmt.where(exclude_deleted(Partner))
     return db.exec(stmt.order_by(Partner.created_at.desc())).all()
 
-
 def get_partner(db: Session, partner_id: UUID, include_deleted: bool = False) -> Partner | None:
     stmt = select(Partner).where(Partner.id == partner_id)
     if not include_deleted:
         stmt = stmt.where(exclude_deleted(Partner))
     return db.exec(stmt).first()
-
 
 def update_partner(db: Session, partner: Partner, data: dict) -> Partner:
     for key, value in data.items():
@@ -158,18 +144,15 @@ def update_partner(db: Session, partner: Partner, data: dict) -> Partner:
     db.refresh(partner)
     return partner
 
-
 def soft_delete_partner(db: Session, partner: Partner) -> bool:
     partner.soft_delete()
     db.commit()
     return True
 
-
 def hard_delete_partner(db: Session, partner: Partner) -> bool:
     db.delete(partner)
     db.commit()
     return True
-
 
 # --- Event ---
 def create_event(db: Session, data: dict) -> Event:
@@ -179,20 +162,17 @@ def create_event(db: Session, data: dict) -> Event:
     db.refresh(event)
     return event
 
-
 def get_events(db: Session, include_deleted: bool = False) -> list[Event]:
     stmt = select(Event)
     if not include_deleted:
         stmt = stmt.where(exclude_deleted(Event))
     return db.exec(stmt.order_by(Event.created_at.desc())).all()
 
-
 def get_event(db: Session, event_id: UUID, include_deleted: bool = False) -> Event | None:
     stmt = select(Event).where(Event.id == event_id)
     if not include_deleted:
         stmt = stmt.where(exclude_deleted(Event))
     return db.exec(stmt).first()
-
 
 def update_event(db: Session, event: Event, data: dict) -> Event:
     for key, value in data.items():
@@ -202,18 +182,15 @@ def update_event(db: Session, event: Event, data: dict) -> Event:
     db.refresh(event)
     return event
 
-
 def soft_delete_event(db: Session, event: Event) -> bool:
     event.soft_delete()
     db.commit()
     return True
 
-
 def hard_delete_event(db: Session, event: Event) -> bool:
     db.delete(event)
     db.commit()
     return True
-
 
 # --- Speaker ---
 def create_speaker(db: Session, data: dict) -> Speaker:
@@ -223,20 +200,17 @@ def create_speaker(db: Session, data: dict) -> Speaker:
     db.refresh(speaker)
     return speaker
 
-
 def get_speakers(db: Session, include_deleted: bool = False) -> list[Speaker]:
     stmt = select(Speaker)
     if not include_deleted:
         stmt = stmt.where(exclude_deleted(Speaker))
     return db.exec(stmt.order_by(Speaker.created_at.desc())).all()
 
-
 def get_speaker(db: Session, speaker_id: UUID, include_deleted: bool = False) -> Speaker | None:
     stmt = select(Speaker).where(Speaker.id == speaker_id)
     if not include_deleted:
         stmt = stmt.where(exclude_deleted(Speaker))
     return db.exec(stmt).first()
-
 
 def update_speaker(db: Session, speaker: Speaker, data: dict) -> Speaker:
     for key, value in data.items():
@@ -246,18 +220,15 @@ def update_speaker(db: Session, speaker: Speaker, data: dict) -> Speaker:
     db.refresh(speaker)
     return speaker
 
-
 def soft_delete_speaker(db: Session, speaker: Speaker) -> bool:
     speaker.soft_delete()
     db.commit()
     return True
 
-
 def hard_delete_speaker(db: Session, speaker: Speaker) -> bool:
     db.delete(speaker)
     db.commit()
     return True
-
 
 # --- Speaker Material ---
 def create_speaker_material(
@@ -284,7 +255,6 @@ def create_speaker_material(
     db.refresh(material)
     return material
 
-
 def get_materials_by_speaker(db: Session, speaker_id: UUID) -> list[SpeakerMaterial]:
     return db.exec(
         select(SpeakerMaterial)
@@ -294,7 +264,6 @@ def get_materials_by_speaker(db: Session, speaker_id: UUID) -> list[SpeakerMater
         )
         .order_by(SpeakerMaterial.created_at.desc())
     ).all()
-
 
 # --- Certificate ---
 def create_certificate(
@@ -322,7 +291,6 @@ def create_certificate(
     db.refresh(certificate)
     return certificate
 
-
 def get_certificate_by_code(db: Session, code: str) -> Certificate | None:
     return db.exec(
         select(Certificate).where(
@@ -330,7 +298,6 @@ def get_certificate_by_code(db: Session, code: str) -> Certificate | None:
             exclude_deleted(Certificate)
         )
     ).first()
-
 
 def get_certificates_by_user(db: Session, user_id: UUID) -> list[Certificate]:
     return db.exec(
