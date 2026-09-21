@@ -1,0 +1,17 @@
+[project]
+name = "palapi"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "bcrypt>=5.0.0",
+    "fastapi>=0.141.1",
+    "limits>=5.8.0",
+    "pymysql>=1.2.3",
+    "python-dotenv>=1.2.3",
+    "python-multipart>=0.0.32",
+    "slowapi>=0.1.10",
+    "sqlmodel>=0.0.42",
+    "tzdata>=2026.4",
+    "uuid-utils>=1.0.0",
+    "uvicorn>=0.53.0",
+]
