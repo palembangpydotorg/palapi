@@ -80,7 +80,6 @@ class Event(SoftDeleteMixin, table=True):
     start_time: Optional[datetime] = Field(default=None)
     end_time: Optional[datetime] = Field(default=None)
     
-    # ✅ DITAMBAHKAN SESUAI PERINTAH
     is_paid: bool = Field(default=False, nullable=False)
     price: float = Field(default=0.0, nullable=False)
     
@@ -141,4 +140,19 @@ class Certificate(SoftDeleteMixin, table=True):
     role: str = Field(max_length=50, default="Participant")
     file_path: str = Field(max_length=500)
     issued_by: UUID = Field(foreign_key="users.id")
+    created_at: datetime = Field(default_factory=now_jakarta)
+
+# TODO: Project
+class Project(SoftDeleteMixin, table=True):
+    __tablename__ = "projects"
+    id: UUID = Field(default_factory=uuid7, primary_key=True)
+    title: str = Field(nullable=False, max_length=200)
+    description: Optional[str] = Field(default=None)
+    user_id: UUID = Field(foreign_key="users.id", index=True)
+    github_url: Optional[str] = Field(default=None, max_length=255)
+    demo_url: Optional[str] = Field(default=None, max_length=255)
+    image_url: Optional[str] = Field(default=None, max_length=255)
+    tags: Optional[str] = Field(default=None, max_length=255)  # contoh: "python,fastapi,docker"
+    is_featured: bool = Field(default=False, nullable=False)
+    status: str = Field(default="draft", max_length=20)  # draft / published
     created_at: datetime = Field(default_factory=now_jakarta)

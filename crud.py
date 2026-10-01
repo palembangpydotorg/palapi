@@ -9,7 +9,7 @@ import string
 import bcrypt
 from models import (
     User, Partner, Event, Speaker,
-    SpeakerMaterial, Certificate
+    SpeakerMaterial, Certificate, Project, EventRegistration
 )
 
 # --- Security ---
@@ -327,3 +327,42 @@ def get_event_registrations(db: Session, event_id: UUID):
 
 def get_user_events(db: Session, user_id: UUID):
     return db.exec(select(EventRegistration).where(EventRegistration.user_id == user_id)).all()
+
+# TODO: Project
+def create_project(db: Session, data: dict) -> Project:
+    project = Project(**data)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    return project
+
+def get_projects(db: Session, include_deleted: bool = False, featured_only: bool = False) -> list[Project]:
+    stmt = select(Project)
+    if not include_deleted:
+        stmt = stmt.where(Project.deleted_at == None)
+    if featured_only:
+        stmt = stmt.where(Project.is_featured == True)
+    return db.exec(stmt.order_by(Project.created_at.desc())).all()
+
+def get_project(db: Session, project_id: UUID, include_deleted: bool = False) -> Project | None:
+    stmt = select(Project).where(Project.id == project_id)
+    if not include_deleted:
+        stmt = stmt.where(Project.deleted_at == None)
+    return db.exec(stmt).first()
+
+def update_project(db: Session, project: Project, data: dict) -> Project:
+    for key, value in data.items():
+        setattr(project, key, value)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    return project
+
+def soft_delete_project(db: Session, project: Project):
+    project.soft_delete()
+    db.add(project)
+    db.commit()
+
+def hard_delete_project(db: Session, project: Project):
+    db.delete(project)
+    db.commit()

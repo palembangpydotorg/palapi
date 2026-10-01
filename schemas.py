@@ -209,3 +209,38 @@ class CertificateResponse(BaseModel):
     _convert_all = field_validator(
         "id", "user_id", "event_id", "speaker_id", mode="before"
     )(convert_uuid)
+
+# TODO: Projects
+class ProjectCreate(BaseModel):
+    title: str
+    description: str | None = None
+    user_id: UUID
+    github_url: str | None = None
+    demo_url: str | None = None
+    image_url: str | None = None
+    tags: str | None = None
+    is_featured: bool = False
+    status: str = "draft"
+
+class ProjectUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    github_url: str | None = None
+    demo_url: str | None = None
+    image_url: str | None = None
+    tags: str | None = None
+    is_featured: bool | None = None
+    status: str | None = None
+
+class ProjectResponse(BaseModel):
+    id: UUID
+    title: str
+    description: str | None
+    user_id: UUID
+    github_url: str | None
+    demo_url: str | None
+    image_url: str | None
+    tags: str | None
+    is_featured: bool
+    status: str
+    created_at: datetime

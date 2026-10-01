@@ -725,6 +725,91 @@ def verify_certificate(
         raise HTTPException(status_code=404, detail="Certificate not found or revoked")
     return certificate
 
+# TODO: project
+# --- Project Endpoints ---
+@app.get("/v1/projects", response_model=list[schemas.ProjectResponse])
+@limiter.limit("60/minute")
+def list_projects(
+    *,
+    request: Request,
+    db: DB,
+    current_user: CurrentUser,
+    include_deleted: bool = Query(False),
+    featured_only: bool = Query(False)
+):
+    return crud.get_projects(db, include_deleted=include_deleted, featured_only=featured_only)
+
+@app.post("/v1/projects", response_model=schemas.ProjectResponse, status_code=201)
+@limiter.limit("20/minute")
+def create_project_record(
+    *,
+    request: Request,
+    data: schemas.ProjectCreate,
+    db: DB,
+    current_user: CurrentUser
+):
+    return crud.create_project(db, data.model_dump())
+
+@app.get("/v1/projects/{project_id}", response_model=schemas.ProjectResponse)
+@limiter.limit("60/minute")
+def get_project_detail(
+    *,
+    request: Request,
+    project_id: UUID,
+    db: DB,
+    current_user: CurrentUser,
+    include_deleted: bool = Query(False)
+):
+    project = crud.get_project(db, project_id, include_deleted=include_deleted)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+@app.patch("/v1/projects/{project_id}", response_model=schemas.ProjectResponse)
+@limiter.limit("30/minute")
+def update_project_detail(
+    *,
+    request: Request,
+    project_id: UUID,
+    data: schemas.ProjectUpdate,
+    db: DB,
+    current_user: CurrentUser
+):
+    project = crud.get_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return crud.update_project(db, project, data.model_dump(exclude_unset=True))
+
+@app.delete("/v1/projects/{project_id}/soft")
+@limiter.limit("15/minute")
+def soft_delete_project_record(
+    *,
+    request: Request,
+    project_id: UUID,
+    db: DB,
+    current_user: CurrentUser
+):
+    project = crud.get_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    crud.soft_delete_project(db, project)
+    return {"status": "success", "message": "Project soft deleted"}
+
+@app.delete("/v1/projects/{project_id}/hard")
+@limiter.limit("10/minute")
+def hard_delete_project_record(
+    *,
+    request: Request,
+    project_id: UUID,
+    db: DB,
+    current_user: CurrentUser
+):
+    project = crud.get_project(db, project_id, include_deleted=True)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    crud.hard_delete_project(db, project)
+    return {"status": "success", "message": "Project permanently deleted"}
+
 
 if __name__ == "__main__":
     import uvicorn
