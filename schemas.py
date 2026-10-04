@@ -4,9 +4,6 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, field_validator, Field
 import re
 
-def convert_uuid(v):
-    return str(v) if isinstance(v, UUID) else v
-
 def sanitize_string(value: str, min_length: int = 1, max_length: int = 255) -> str:
     if not value or not value.strip():
         raise ValueError("Field cannot be empty")
@@ -22,7 +19,7 @@ TELEGRAM_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
 # === USER ===
 class UserBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
-    username: str = Field(..., min_length=2, max_length=100)
+    username: Optional[str] = Field(None, min_length=2, max_length=100)
     telegram_id: Optional[str] = Field(None, max_length=50)
     avatar_url: Optional[str] = Field(None, max_length=255)
     bio: Optional[str] = Field(None, max_length=500)
@@ -36,10 +33,14 @@ class UserBase(BaseModel):
     points: int = Field(0, ge=0)
 
     @field_validator("name", "username")
+    @classmethod
     def clean_string_fields(cls, value):
+        if value is None:
+            return value
         return sanitize_string(value)
 
     @field_validator("telegram_id")
+    @classmethod
     def validate_telegram_id(cls, value):
         if value and not TELEGRAM_ID_PATTERN.match(value):
             raise ValueError("Invalid telegram_id format")
@@ -50,11 +51,10 @@ class UserCreate(UserBase):
 
 class UserResponse(UserBase):
     model_config = ConfigDict(from_attributes=True)
-    id: str
+    id: UUID
     member_code: str
     created_at: datetime
     deleted_at: Optional[datetime] = None
-    _convert_id = field_validator("id", mode="before")(convert_uuid)
 
 class UserCreateResponse(UserResponse):
     generated_password: str
@@ -75,10 +75,12 @@ class UserUpdate(BaseModel):
     points: Optional[int] = Field(None, ge=0)
 
     @field_validator("name", "username")
+    @classmethod
     def clean_string_fields(cls, value):
         return sanitize_string(value) if value else value
 
     @field_validator("telegram_id")
+    @classmethod
     def validate_telegram_id(cls, value):
         if value and not TELEGRAM_ID_PATTERN.match(value):
             raise ValueError("Invalid telegram_id format")
@@ -106,10 +108,9 @@ class PartnerUpdate(BaseModel):
 
 class PartnerResponse(PartnerBase):
     model_config = ConfigDict(from_attributes=True)
-    id: str
+    id: UUID
     created_at: datetime
     deleted_at: Optional[datetime] = None
-    _convert_id = field_validator("id", mode="before")(convert_uuid)
 
 # === EVENT ===
 class EventBase(BaseModel):
@@ -142,18 +143,17 @@ class EventRegistrationResponse(BaseModel):
     event_id: UUID
     registered_at: datetime
     status: str
-  
+
 class EventResponse(EventBase):
     model_config = ConfigDict(from_attributes=True)
-    id: str
+    id: UUID
     created_at: datetime
     deleted_at: Optional[datetime] = None
-    _convert_id = field_validator("id", mode="before")(convert_uuid)
 
 # === SPEAKER ===
 class SpeakerBase(BaseModel):
-    user_id: str
-    event_id: str
+    user_id: UUID
+    event_id: UUID
     topic: Optional[str] = Field(None, max_length=200)
     bio: Optional[str] = None
 
@@ -166,12 +166,11 @@ class SpeakerUpdate(BaseModel):
 
 class SpeakerResponse(SpeakerBase):
     model_config = ConfigDict(from_attributes=True)
-    id: str
+    id: UUID
     created_at: datetime
     deleted_at: Optional[datetime] = None
     user: Optional[UserResponse] = None
     event: Optional[EventResponse] = None
-    _convert_all = field_validator("id", "user_id", "event_id", mode="before")(convert_uuid)
 
 # === SPEAKER MATERIAL ===
 class SpeakerMaterialBase(BaseModel):
@@ -180,14 +179,13 @@ class SpeakerMaterialBase(BaseModel):
 
 class SpeakerMaterialResponse(SpeakerMaterialBase):
     model_config = ConfigDict(from_attributes=True)
-    id: str
-    speaker_id: str
+    id: UUID
+    speaker_id: UUID
     file_path: str
     file_original_name: str
     file_mime_type: str
     file_size: int
     created_at: datetime
-    _convert_all = field_validator("id", "speaker_id", mode="before")(convert_uuid)
 
 # === CERTIFICATE ===
 class CertificateGenerate(BaseModel):
@@ -196,21 +194,18 @@ class CertificateGenerate(BaseModel):
 
 class CertificateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    id: str
+    id: UUID
     code: str
-    user_id: str
-    event_id: str
+    user_id: UUID
+    event_id: UUID
     speaker_id: Optional[str] = None
     recipient_name: str
     event_name: str
     role: str
     file_path: str
     created_at: datetime
-    _convert_all = field_validator(
-        "id", "user_id", "event_id", "speaker_id", mode="before"
-    )(convert_uuid)
 
-# TODO: Projects
+# === PROJECTS ===
 class ProjectCreate(BaseModel):
     title: str
     description: str | None = None
@@ -244,3 +239,13 @@ class ProjectResponse(BaseModel):
     is_featured: bool
     status: str
     created_at: datetime
+
+# === WEB CONTACT & CHAT WIDGET ===
+class ContactFormRequest(BaseModel):
+    name: str
+    email: str
+    subject: str
+    message: str
+
+class ChatWidgetRequest(BaseModel):
+    message: str

@@ -75,6 +75,7 @@ class Event(SoftDeleteMixin, table=True):
     __tablename__ = "events"
     id: UUID = Field(default_factory=uuid7, primary_key=True)
     title: str = Field(nullable=False, max_length=200)
+    type: str = Field(default="Meetup", max_length=50)
     description: Optional[str] = Field(default=None)
     location: Optional[str] = Field(default=None, max_length=200)
     start_time: Optional[datetime] = Field(default=None)

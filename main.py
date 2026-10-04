@@ -7,8 +7,8 @@ import hmac
 import json
 import os
 from urllib.parse import parse_qsl
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Depends, UploadFile, File, Form, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +19,9 @@ from slowapi.errors import RateLimitExceeded
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
+from telegram import Update, Bot
+from telegram.ext import Application
+
 from database import init_db, get_session
 from models import User
 from crud import verify_password
@@ -27,11 +30,12 @@ import crud
 
 load_dotenv()
 
-# --- JWT Config ---
+# --- Config & Environment ---
 SECRET_KEY = os.getenv("SECRET_KEY", "CHANGE_THIS_TO_STRONG_SECRET_KEY_IN_PRODUCTION")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 
 
 class Token(BaseModel):
@@ -94,14 +98,23 @@ async def get_current_user(
     if not auth_header or not auth_header.startswith("Bearer "):
         raise credentials_exception
     token = auth_header.split(" ")[1]
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str | None = payload.get("sub")
-        if user_id is None:
+        user_id_str: str | None = payload.get("sub")
+        if user_id_str is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    user = db.exec(select(User).where(User.id == user_id, User.deleted_at == None)).first()
+
+    from uuid import UUID
+    try:
+        user_id_obj = UUID(user_id_str)
+    except ValueError:
+        raise credentials_exception
+
+    user = db.exec(select(User).where(User.id == user_id_obj, User.deleted_at == None)).first()
+
     if user is None:
         raise credentials_exception
     return user
@@ -116,13 +129,34 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+
+    if BOT_TOKEN:
+        tg_app = Application.builder().token(BOT_TOKEN).build()
+        
+        from handlers import setup_handlers
+        setup_handlers(tg_app)
+        
+        await tg_app.initialize()
+        
+        if WEBHOOK_URL:
+            webhook_endpoint = f"{WEBHOOK_URL.rstrip('/')}/v1/webhook/telegram"
+            await tg_app.bot.set_webhook(url=webhook_endpoint)
+            print(f"🔗 Telegram Webhook successfully set to: {webhook_endpoint}")
+            
+        await tg_app.start()
+        app.state.tg_app = tg_app
+
     yield
+
+    if BOT_TOKEN and hasattr(app.state, "tg_app"):
+        await app.state.tg_app.stop()
+        await app.state.tg_app.shutdown()
 
 
 app = FastAPI(
-    title="PalembangPy Community API",
-    version="1.1.0",
-    description="User, Partner, Event, Speaker, Certificate, Registration & File Management",
+    title="PalembangPy Community API & Webhook",
+    version="1.2.0",
+    description="Production-ready FastAPI backend with Telegram Webhook & full features",
     lifespan=lifespan
 )
 
@@ -135,6 +169,82 @@ app.add_middleware(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# ==========================================
+# --- TELEGRAM WEBHOOK ENDPOINT ---
+# ==========================================
+@app.post("/v1/webhook/telegram")
+async def telegram_webhook(request: Request):
+    if not hasattr(app.state, "tg_app"):
+        raise HTTPException(status_code=503, detail="Telegram bot is not initialized")
+    
+    try:
+        data = await request.json()
+        update = Update.de_json(data, app.state.tg_app.bot)
+        await app.state.tg_app.process_update(update)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ==========================================
+# --- WEB INBOX ENDPOINTS (CONTACT & CHAT) --
+# ==========================================
+def escape_markdown_v2(text: str) -> str:
+    return str(text or '').replace('_','\\_').replace('*','\\*').replace('[','\\[').replace(']','\\]').replace('(','\\(').replace(')','\\)').replace('~','\\~').replace('`','\\`').replace('>','\\>').replace('#','\\#').replace('+','\\+').replace('-','\\-').replace('=','\\=').replace('|','\\|').replace('{','\\{').replace('}','\\}').replace('.','\\.').replace('!','\\!')
+
+@app.post("/v1/contact")
+@limiter.limit("10/minute")
+async def submit_contact_form(request: Request, data: schemas.ContactFormRequest):
+    inbox_chat_id = os.getenv("INBOX_CHAT_ID") or os.getenv("GROUP_CHAT_ID")
+    if not BOT_TOKEN or not inbox_chat_id:
+        raise HTTPException(status_code=500, detail="Telegram Bot Token atau Inbox Chat ID belum dikonfigurasi.")
+
+    telegram_text = (
+        f"*Eeeh Bang, Ada Pesan Masuk Dari Kontak Nih\\!*\n\n"
+        f"*Nama Pengirim:* {escape_markdown_v2(data.name)}\n"
+        f"*Email Pengirim:* {escape_markdown_v2(data.email)}\n"
+        f"*Perihal Pengirim:* {escape_markdown_v2(data.subject)}\n\n"
+        f"*Isi Pesannya:*\n> {escape_markdown_v2(data.message)}"
+    )
+
+    bot = Bot(token=BOT_TOKEN)
+    try:
+        await bot.send_message(chat_id=inbox_chat_id, text=telegram_text, parse_mode="MarkdownV2")
+        return {"status": "success", "message": "Pesan berhasil dikirim ke pengurus."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gagal mengirim ke Telegram: {str(e)}")
+
+@app.post("/v1/chat")
+@limiter.limit("30/minute")
+async def submit_chat_widget(request: Request, data: schemas.ChatWidgetRequest):
+    inbox_chat_id = os.getenv("INBOX_CHAT_ID") or os.getenv("GROUP_CHAT_ID")
+    if not BOT_TOKEN or not inbox_chat_id:
+        raise HTTPException(status_code=500, detail="Konfigurasi Telegram belum lengkap.")
+
+    telegram_text = (
+        f"*💬 Pesan Baru dari Web Chat Widget\\!*\n\n"
+        f"*Isi Pesan:*\n> {escape_markdown_v2(data.message)}"
+    )
+
+    bot = Bot(token=BOT_TOKEN)
+    try:
+        await bot.send_message(chat_id=inbox_chat_id, text=telegram_text, parse_mode="MarkdownV2")
+        
+        normalized = data.message.lower()
+        if any(k in normalized for k in ['event', 'acara', 'workshop', 'meetup']):
+            reply = 'Untuk jadwal kegiatan bisa dilihat di halaman Event. Pesan Anda telah diteruskan ke PalembangPy Inbox.'
+        elif any(k in normalized for k in ['project', 'proyek', 'github']):
+            reply = 'Kamu bisa melihat karya komunitas di halaman Project. Pesan Anda sudah diteruskan ke pengurus.'
+        elif any(k in normalized for k in ['kontak', 'email', 'kerja sama', 'kerjasama']):
+            reply = 'Silakan gunakan formulir pada halaman Kontak. Pesan Anda sudah masuk ke inbox pengurus.'
+        else:
+            reply = 'Pesan diterima dan telah diteruskan ke grup PalembangPy Inbox. Terima kasih sudah menyapa!'
+
+        return {"status": "success", "reply": reply}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gagal memproses chat: {str(e)}")
 
 
 # --- Auth ---
@@ -428,12 +538,11 @@ def hard_delete_partner_info(
 
 # --- Event Endpoints ---
 @app.get("/v1/events", response_model=list[schemas.EventResponse])
-@limiter.limit("60/minute")
+@limiter.limit("120/minute")
 def list_events(
     *,
     request: Request,
     db: DB,
-    current_user: CurrentUser,
     include_deleted: bool = Query(False)
 ):
     return crud.get_events(db, include_deleted=include_deleted)
@@ -553,9 +662,9 @@ def list_event_registrations(
     return crud.get_event_registrations(db, event_id)
 
 
-@app.post("/v1/events/{event_id}/generate-certificates", status_code=201)
+@app.post("/v1/events/{event_id}/gencert", status_code=201)
 @limiter.limit("10/minute")
-def generate_certificates_for_event(
+def gencert(
     *,
     request: Request,
     event_id: UUID,
@@ -595,7 +704,6 @@ def list_speakers(
     *,
     request: Request,
     db: DB,
-    current_user: CurrentUser,
     include_deleted: bool = Query(False)
 ):
     return crud.get_speakers(db, include_deleted=include_deleted)
@@ -725,7 +833,7 @@ def verify_certificate(
         raise HTTPException(status_code=404, detail="Certificate not found or revoked")
     return certificate
 
-# TODO: project
+
 # --- Project Endpoints ---
 @app.get("/v1/projects", response_model=list[schemas.ProjectResponse])
 @limiter.limit("60/minute")
@@ -733,11 +841,11 @@ def list_projects(
     *,
     request: Request,
     db: DB,
-    current_user: CurrentUser,
     include_deleted: bool = Query(False),
     featured_only: bool = Query(False)
 ):
     return crud.get_projects(db, include_deleted=include_deleted, featured_only=featured_only)
+
 
 @app.post("/v1/projects", response_model=schemas.ProjectResponse, status_code=201)
 @limiter.limit("20/minute")
@@ -749,6 +857,7 @@ def create_project_record(
     current_user: CurrentUser
 ):
     return crud.create_project(db, data.model_dump())
+
 
 @app.get("/v1/projects/{project_id}", response_model=schemas.ProjectResponse)
 @limiter.limit("60/minute")
@@ -765,6 +874,7 @@ def get_project_detail(
         raise HTTPException(status_code=404, detail="Project not found")
     return project
 
+
 @app.patch("/v1/projects/{project_id}", response_model=schemas.ProjectResponse)
 @limiter.limit("30/minute")
 def update_project_detail(
@@ -780,6 +890,7 @@ def update_project_detail(
         raise HTTPException(status_code=404, detail="Project not found")
     return crud.update_project(db, project, data.model_dump(exclude_unset=True))
 
+
 @app.delete("/v1/projects/{project_id}/soft")
 @limiter.limit("15/minute")
 def soft_delete_project_record(
@@ -794,6 +905,7 @@ def soft_delete_project_record(
         raise HTTPException(status_code=404, detail="Project not found")
     crud.soft_delete_project(db, project)
     return {"status": "success", "message": "Project soft deleted"}
+
 
 @app.delete("/v1/projects/{project_id}/hard")
 @limiter.limit("10/minute")
@@ -811,6 +923,39 @@ def hard_delete_project_record(
     return {"status": "success", "message": "Project permanently deleted"}
 
 
+# ==========================================
+# --- PUBLIC STATS ENDPOINT ---
+# ==========================================
+@app.get("/v1/stats")
+@limiter.limit("120/minute")
+def public_stats(
+    *,
+    request: Request,
+    db: DB
+):
+    from models import Event, Speaker, Project, User, Partner
+    from sqlmodel import select
+
+    users = db.exec(select(User).where(User.deleted_at == None)).all()
+    events = db.exec(select(Event).where(Event.deleted_at == None)).all()
+    speakers = db.exec(select(Speaker).where(Speaker.deleted_at == None)).all()
+    partners = db.exec(select(Partner).where(Partner.deleted_at == None)).all()
+    projects = db.exec(select(Project).where(Project.deleted_at == None, Project.status == "published")).all()
+
+    admins = sum(1 for u in users if u.is_admin)
+    staffs = sum(1 for u in users if u.is_staff and not u.is_admin)
+
+    return {
+        "members": len(users),
+        "admins": admins,
+        "staffs": staffs,
+        "events": len(events),
+        "speakers": len(speakers),
+        "partners": len(partners),
+        "projects": len(projects)
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=5174, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
