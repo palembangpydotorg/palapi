@@ -133,7 +133,7 @@ async def lifespan(app: FastAPI):
     if BOT_TOKEN:
         tg_app = Application.builder().token(BOT_TOKEN).build()
         
-        from handlers import setup_handlers
+        from bot.handlers import setup_handlers
         setup_handlers(tg_app)
         
         await tg_app.initialize()

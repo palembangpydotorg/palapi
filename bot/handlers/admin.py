@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 from sqlmodel import Session, select
 from database import engine
 from models import User, Event, Partner, Speaker, Project
-from handlers.permissions import require_admin
+from .permissions import require_admin
 
 JAKARTA_TZ = ZoneInfo("Asia/Jakarta")
 CHANNEL_ID = os.getenv("CHANNEL_ID")

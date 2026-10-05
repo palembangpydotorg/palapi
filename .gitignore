@@ -30,7 +30,7 @@ seed_data.py
 
 # UV
 .uv/
-
+uv.lock
 # IDE & Editor
 .vscode/
 .idea/

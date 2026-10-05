@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 from database import engine
 from models import User
 from crud import create_user
-from bot.captcha import generate_captcha_gif
+from .captcha import generate_captcha_gif
 
 ASK_NAME, ASK_CAPTCHA, CONFIRM = range(3)
 
@@ -20,18 +20,24 @@ ASK_NAME, ASK_CAPTCHA, CONFIRM = range(3)
 async def start_register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user = update.effective_user
     
+    # Jika dipanggil dari tombol inline, answer query-nya dulu supaya loading berhentinya mutar
+    if update.callback_query:
+        await update.callback_query.answer()
+        
+    message = update.effective_message
+
     with Session(engine) as db:
         existing = db.exec(
             select(User).where(User.telegram_id == str(tg_user.id), User.deleted_at == None)
         ).first()
         
         if existing:
-            await update.message.reply_text(
+            await message.reply_text(
                 f"Halo {existing.name}! Kamu sudah terdaftar sebagai member PalembangPy."
             )
             return ConversationHandler.END
 
-    await update.message.reply_text(
+    await message.reply_text(
         "👋 Selamat datang di PalembangPy!\n\n"
         "Mari buat kartu member komunitasmu. Siapa nama lengkapmu?"
     )
@@ -163,9 +169,12 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-# Export ConversationHandler
+# Export ConversationHandler dengan Entry Point ganda (Command /register atau Tombol buat_akun)
 register_conv = ConversationHandler(
-    entry_points=[CommandHandler("register", start_register)],
+    entry_points=[
+        CommandHandler("register", start_register),
+        CallbackQueryHandler(start_register, pattern="^buat_akun$")
+    ],
     states={
         ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
         ASK_CAPTCHA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_captcha)],

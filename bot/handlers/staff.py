@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes
 from sqlmodel import Session, select
 from database import engine
 from models import User, Event, Speaker, Project
-from handlers.permissions import require_staff
+from .permissions import require_staff
 
 JAKARTA_TZ = ZoneInfo("Asia/Jakarta")
 
